@@ -1,0 +1,83 @@
+#import <UIKit/UIKit.h>
+
+extern "C"
+{
+    void _HapticsImpact(int style)
+    {
+        if (@available(iOS 10.0, *))
+        {
+            UIImpactFeedbackStyle impactStyle =
+                UIImpactFeedbackStyleLight;
+
+            switch (style)
+            {
+                case 1:
+                    impactStyle =
+                        UIImpactFeedbackStyleMedium;
+                    break;
+
+                case 2:
+                    impactStyle =
+                        UIImpactFeedbackStyleHeavy;
+                    break;
+
+                default:
+                    impactStyle =
+                        UIImpactFeedbackStyleLight;
+                    break;
+            }
+
+            UIImpactFeedbackGenerator *generator =
+                [[UIImpactFeedbackGenerator alloc]
+                    initWithStyle:impactStyle];
+
+            [generator prepare];
+            [generator impactOccurred];
+        }
+    }
+
+    void _HapticsSelection()
+    {
+        if (@available(iOS 10.0, *))
+        {
+            UISelectionFeedbackGenerator *generator =
+                [[UISelectionFeedbackGenerator alloc] init];
+
+            [generator prepare];
+            [generator selectionChanged];
+        }
+    }
+
+    void _HapticsNotification(int type)
+    {
+        if (@available(iOS 10.0, *))
+        {
+            UINotificationFeedbackType feedbackType =
+                UINotificationFeedbackTypeSuccess;
+
+            switch (type)
+            {
+                case 1:
+                    feedbackType =
+                        UINotificationFeedbackTypeWarning;
+                    break;
+
+                case 2:
+                    feedbackType =
+                        UINotificationFeedbackTypeError;
+                    break;
+
+                default:
+                    feedbackType =
+                        UINotificationFeedbackTypeSuccess;
+                    break;
+            }
+
+            UINotificationFeedbackGenerator *generator =
+                [[UINotificationFeedbackGenerator alloc] init];
+
+            [generator prepare];
+            [generator notificationOccurred:feedbackType];
+        }
+    }
+}

@@ -1,0 +1,2 @@
+# Keep files exactly as they are (avoid CRLF/LF conversions between Windows and other tools)
+* -text

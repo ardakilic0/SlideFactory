@@ -53,6 +53,85 @@ public class LevelCompleteAnimator : MonoBehaviour
     private Coroutine animationRoutine;
     private Coroutine sparklePulseRoutine;
 
+    // =========================================================
+    // FINAL LEVEL MODE
+    // =========================================================
+
+    [Header("Final Level")]
+    [SerializeField] private string finalLevelTitle = "ALL LEVELS COMPLETE!";
+    [SerializeField] private string finalLevelButtonLabel = "MAIN MENU";
+
+    private bool normalStateCached;
+    private string normalTitle;
+    private bool normalTitleAutoSizing;
+    private float normalTitleFontSizeMin;
+    private TMP_Text nextLevelLabel;
+    private string normalNextLevelLabel;
+    private GameObject nextLevelArrowIcon;
+
+    // Called before the panel is shown. On the final level the primary
+    // button becomes "MAIN MENU" (LevelManager.LoadNextLevel returns to the
+    // menu there) and the secondary main-menu button is hidden.
+    public void SetFinalLevelMode(bool isFinalLevel)
+    {
+        CacheNormalState();
+
+        if (titleText != null)
+        {
+            titleText.text = isFinalLevel ? finalLevelTitle : normalTitle;
+
+            // The final title is longer; let it shrink to fit the title box.
+            titleText.enableAutoSizing =
+                isFinalLevel || normalTitleAutoSizing;
+
+            titleText.fontSizeMin =
+                isFinalLevel
+                    ? Mathf.Min(normalTitleFontSizeMin, 36f)
+                    : normalTitleFontSizeMin;
+        }
+
+        if (nextLevelLabel != null)
+        {
+            nextLevelLabel.text =
+                isFinalLevel ? finalLevelButtonLabel : normalNextLevelLabel;
+        }
+
+        if (nextLevelArrowIcon != null)
+            nextLevelArrowIcon.SetActive(!isFinalLevel);
+
+        if (mainMenuButton != null)
+            mainMenuButton.gameObject.SetActive(!isFinalLevel);
+    }
+
+    private void CacheNormalState()
+    {
+        if (normalStateCached)
+            return;
+
+        normalStateCached = true;
+
+        if (titleText != null)
+        {
+            normalTitle = titleText.text;
+            normalTitleAutoSizing = titleText.enableAutoSizing;
+            normalTitleFontSizeMin = titleText.fontSizeMin;
+        }
+
+        if (nextLevelButton != null)
+        {
+            nextLevelLabel =
+                nextLevelButton.GetComponentInChildren<TMP_Text>(true);
+
+            if (nextLevelLabel != null)
+                normalNextLevelLabel = nextLevelLabel.text;
+
+            Transform arrow = nextLevelButton.Find("ArrowIcon");
+
+            if (arrow != null)
+                nextLevelArrowIcon = arrow.gameObject;
+        }
+    }
+
 
     // =========================================================
     // AWAKE
@@ -190,6 +269,10 @@ public class LevelCompleteAnimator : MonoBehaviour
         // 3 — Kutlama
         // =====================================================
 
+        // Played with the confetti, after the last Box's goal
+        // sound, so the two do not overlap.
+        AudioManager.Play(GameSfx.LevelComplete);
+
         if (confetti != null)
         {
             confetti.PlayBurst();
@@ -279,13 +362,27 @@ public class LevelCompleteAnimator : MonoBehaviour
         // 6 — Level satırı
         // =====================================================
 
-        yield return FadeAndScale(
-            levelRow,
-            levelRowCanvasGroup,
-            0.94f,
-            1f,
-            0.14f
-        );
+        // Stars + rewards replace the "LEVEL n" row when present.
+        CompleteRewardsView rewardsView =
+            GetComponentInChildren<CompleteRewardsView>(true);
+
+        if (rewardsView != null && rewardsView.HasContent)
+        {
+            if (levelRowCanvasGroup != null)
+                levelRowCanvasGroup.alpha = 0f;
+
+            yield return rewardsView.PlayReveal();
+        }
+        else
+        {
+            yield return FadeAndScale(
+                levelRow,
+                levelRowCanvasGroup,
+                0.94f,
+                1f,
+                0.14f
+            );
+        }
 
 
         // =====================================================

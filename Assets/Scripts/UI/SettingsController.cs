@@ -49,6 +49,8 @@ public class SettingsController : MonoBehaviour
 
         LoadSettings();
         HapticsManager.SetEnabled(hapticsEnabled);
+        AudioManager.SetSoundEnabled(soundEnabled);
+        AudioManager.SetMusicEnabled(musicEnabled);
 
         RefreshToggleVisuals();
         RefreshSceneLayout();
@@ -159,6 +161,7 @@ public class SettingsController : MonoBehaviour
         );
 
         SaveSettings();
+        AudioManager.SetSoundEnabled(soundEnabled);
     }
 
     public void ToggleMusic()
@@ -171,6 +174,7 @@ public class SettingsController : MonoBehaviour
         );
 
         SaveSettings();
+        AudioManager.SetMusicEnabled(musicEnabled);
     }
 
     public void ToggleVibration()

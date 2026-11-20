@@ -218,6 +218,7 @@ public class PressurePlate : MonoBehaviour
 
             // Pressed sprite anında görünür.
             SetPressedVisual(true);
+            AudioManager.Play(GameSfx.Plate);
 
             animationRoutine =
                 StartCoroutine(

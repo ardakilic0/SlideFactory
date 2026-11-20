@@ -1,4 +1,4 @@
-using System.Collections.Generic;
+﻿using System.Collections.Generic;
 using System.Text;
 using UnityEngine;
 
@@ -9,7 +9,7 @@ public enum DeadlockCheckResult
     Unknown
 }
 
-public static class DeadlockDetector
+public static partial class DeadlockDetector
 {
     private const int DefaultMaxStates = 25000;
     private const int DefaultMaxMilliseconds = 18;
@@ -870,10 +870,16 @@ public static class DeadlockDetector
                 direction
             );
 
+        // Doors are checked with the moving Box already off its cell
+        // (see WithoutPieces).
         if (targetPosition < 0 ||
             IsBlocked(
                 board,
-                source,
+                WithoutPieces(
+                    board,
+                    source,
+                    pieceIndex
+                ),
                 targetPosition))
         {
             return false;
@@ -926,10 +932,23 @@ public static class DeadlockDetector
                 direction
             );
 
+        // The Box and the pushed Crate both leave their cells.
+        SearchState pushDepartedState =
+            WithoutPieces(
+                board,
+                source,
+                pieceIndex,
+                blockingPieceIndex
+            );
+
         if (pushedTargetPosition < 0 ||
             IsBlocked(
                 board,
-                source,
+                pushDepartedState,
+                targetPosition) ||
+            IsBlocked(
+                board,
+                pushDepartedState,
                 pushedTargetPosition))
         {
             return false;
@@ -999,10 +1018,16 @@ public static class DeadlockDetector
                 direction
             );
 
+        // Doors are checked with the moving Box already off its cell
+        // (see WithoutPieces).
         if (targetPosition < 0 ||
             IsBlocked(
                 board,
-                source,
+                WithoutPieces(
+                    board,
+                    source,
+                    pieceIndex
+                ),
                 targetPosition))
         {
             return false;
@@ -1085,13 +1110,43 @@ public static class DeadlockDetector
                 );
         }
 
+        // The Heavy Box and every pushed Crate leave their cells.
+        SearchState pushDepartedState =
+            WithoutPieces(
+                board,
+                source,
+                pieceIndex,
+                crateIndices
+            );
+
         if (checkPosition < 0 ||
             IsBlocked(
                 board,
-                source,
-                checkPosition))
+                pushDepartedState,
+                checkPosition) ||
+            IsBlocked(
+                board,
+                pushDepartedState,
+                targetPosition))
         {
             return false;
+        }
+
+        // Cells the pushed Crates move into (each one is the cell of the
+        // next Crate in the chain; the last is checkPosition above).
+        for (int i = 1;
+             i < crateIndices.Count;
+             i++)
+        {
+            if (IsBlocked(
+                    board,
+                    pushDepartedState,
+                    source.positions[
+                        crateIndices[i]
+                    ]))
+            {
+                return false;
+            }
         }
 
         if (FindPieceAt(
@@ -1183,6 +1238,18 @@ public static class DeadlockDetector
                 pieceIndex
             ];
 
+        // Runtime (Box.CanIceMove / Box.TryIceMove): a door kept open
+        // only by a Pressure Plate under the Ice closes as the Ice
+        // leaves. Doors on the path are therefore checked with the Ice
+        // already removed from its cell: the Ice cannot start into such
+        // a door, and it stops in front of one further along.
+        SearchState departedState =
+            WithoutPieces(
+                board,
+                source,
+                pieceIndex
+            );
+
         int checkPosition =
             GetNeighborIndex(
                 board,
@@ -1193,7 +1260,7 @@ public static class DeadlockDetector
         if (checkPosition < 0 ||
             IsBlocked(
                 board,
-                source,
+                departedState,
                 checkPosition))
         {
             return false;
@@ -1226,7 +1293,7 @@ public static class DeadlockDetector
 
             if (IsBlocked(
                     board,
-                    source,
+                    departedState,
                     nextPosition))
             {
                 break;
@@ -1662,6 +1729,97 @@ public static class DeadlockDetector
         return foundGoalPiece;
     }
 
+    // =========================================================
+    // PLATE RELEASE (runtime GridManager.CanEnterAfterPlateRelease)
+    // =========================================================
+    //
+    // Pieces that leave their cells in a move stop pressing the
+    // Pressure Plates under them, and the doors those plates held
+    // open close at once. A move may only enter a door that stays
+    // open without them. Doors on the move's destination cells are
+    // therefore checked on a copy of the state with the departing
+    // pieces removed (position -1 = not on the grid).
+    //
+    // When none of the departing pieces stands on a plate, door
+    // states cannot change, so the source state is returned as is
+    // (no allocation in levels without plates).
+
+    private static SearchState WithoutPieces(
+        BoardData board,
+        SearchState source,
+        int pieceIndex,
+        int otherPieceIndex = -1)
+    {
+        if (!StandsOnPlate(board, source, pieceIndex) &&
+            !StandsOnPlate(board, source, otherPieceIndex))
+        {
+            return source;
+        }
+
+        SearchState departed =
+            source.Clone();
+
+        departed.positions[pieceIndex] = -1;
+
+        if (otherPieceIndex >= 0)
+            departed.positions[otherPieceIndex] = -1;
+
+        return departed;
+    }
+
+    private static SearchState WithoutPieces(
+        BoardData board,
+        SearchState source,
+        int pieceIndex,
+        List<int> otherPieceIndices)
+    {
+        bool anyOnPlate =
+            StandsOnPlate(board, source, pieceIndex);
+
+        for (int i = 0;
+             !anyOnPlate && i < otherPieceIndices.Count;
+             i++)
+        {
+            anyOnPlate =
+                StandsOnPlate(
+                    board,
+                    source,
+                    otherPieceIndices[i]
+                );
+        }
+
+        if (!anyOnPlate)
+            return source;
+
+        SearchState departed =
+            source.Clone();
+
+        departed.positions[pieceIndex] = -1;
+
+        for (int i = 0; i < otherPieceIndices.Count; i++)
+            departed.positions[otherPieceIndices[i]] = -1;
+
+        return departed;
+    }
+
+    private static bool StandsOnPlate(
+        BoardData board,
+        SearchState state,
+        int pieceIndex)
+    {
+        if (pieceIndex < 0 ||
+            pieceIndex >= state.positions.Length)
+        {
+            return false;
+        }
+
+        int position = state.positions[pieceIndex];
+
+        return
+            position >= 0 &&
+            board.pressurePlateIDs[position] >= 0;
+    }
+
     private static bool IsBlocked(
         BoardData board,
         SearchState state,
@@ -1936,4 +2094,4 @@ public static class DeadlockDetector
             y * width +
             x;
     }
-}
+}

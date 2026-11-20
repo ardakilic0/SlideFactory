@@ -509,28 +509,14 @@ public class Box : MonoBehaviour
             return false;
         }
 
-        Cell travelCell = targetCell;
-        Cell[] departing = { CurrentCell };
-
-        while (travelCell != null &&
-               !travelCell.IsBlocked &&
-               !travelCell.IsOccupied)
-        {
-            if (!GridManager.Instance.CanEnterAfterPlateRelease(
-                    travelCell,
-                    departing))
-            {
-                return false;
-            }
-
-            travelCell =
-                GridManager.Instance.GetNeighbor(
-                    travelCell,
-                    direction
-                );
-        }
-
-        return true;
+        // The slide is valid when the first cell can be entered once the Ice
+        // leaves its current cell. Further cells only decide where it stops:
+        // a door held open by a Pressure Plate under the Ice closes as the Ice
+        // leaves, so the Ice stops in front of it (see TryIceMove).
+        return GridManager.Instance.CanEnterAfterPlateRelease(
+            targetCell,
+            new Cell[] { CurrentCell }
+        );
     }
 
     // =========================================================
@@ -920,6 +906,7 @@ public class Box : MonoBehaviour
             return;
 
         HapticsManager.Mechanic();
+        AudioManager.Play(GameSfx.Buffer);
 
         if (CurrentCell != null)
         {
@@ -932,6 +919,56 @@ public class Box : MonoBehaviour
     }
 
     // =========================================================
+    // UNDO RESTORE
+    // =========================================================
+
+    // Same as EnterBuffer, without sound / haptics (Undo restore).
+    public void EnterBufferSilently()
+    {
+        if (CurrentCell != null)
+            CurrentCell.SetBox(null);
+
+        CurrentCell = null;
+        gameObject.SetActive(false);
+    }
+
+    // Removes the Box from its cell without any cell effect.
+    public void DetachForRestore()
+    {
+        if (CurrentCell != null)
+            CurrentCell.SetBox(null);
+
+        CurrentCell = null;
+    }
+
+    // Puts the Box into its completed (on goal) look at once.
+    public void RestoreCompleted()
+    {
+        isCompleted = true;
+
+        Vector3 finalCompletedScale =
+            normalVisualScale * completedScale;
+
+        if (visualRoot != null)
+            visualRoot.localScale = finalCompletedScale;
+
+        MovementJuice juice = GetComponent<MovementJuice>();
+
+        if (juice != null)
+            juice.SetRestScale(finalCompletedScale);
+    }
+
+    // After an instant teleport-like placement: stop the movement
+    // juice from reading the jump as a fast move.
+    public void ResetMotionJuice()
+    {
+        MovementJuice juice = GetComponent<MovementJuice>();
+
+        if (juice != null)
+            juice.SetExternalScaleControl(false);
+    }
+
+    // =========================================================
     // UI -> GRID
     // =========================================================
 
@@ -941,6 +978,7 @@ public class Box : MonoBehaviour
             return;
 
         gameObject.SetActive(true);
+        AudioManager.Play(GameSfx.Buffer);
         isMoving = false;
         isAutomaticMoving = false;
 
@@ -1006,6 +1044,7 @@ public class Box : MonoBehaviour
     private void InvalidMove()
     {
         HapticsManager.Invalid();
+        AudioManager.Play(GameSfx.Invalid);
 
         if (invalidMoveJuice != null)
             invalidMoveJuice.Play(lastAttemptedDirection);
@@ -1165,6 +1204,7 @@ public class Box : MonoBehaviour
 
         Cell finalCell = checkCell;
         int travelledCells = 1;
+        Cell[] departing = { CurrentCell };
 
         while (true)
         {
@@ -1177,6 +1217,15 @@ public class Box : MonoBehaviour
             if (nextCell == null ||
                 nextCell.IsBlocked ||
                 nextCell.IsOccupied)
+            {
+                break;
+            }
+
+            // A door kept open only by a plate the Ice is leaving
+            // closes during the slide: stop in front of it.
+            if (!GridManager.Instance.CanEnterAfterPlateRelease(
+                    nextCell,
+                    departing))
             {
                 break;
             }
@@ -1202,6 +1251,7 @@ public class Box : MonoBehaviour
     {
         isMoving = true;
         HapticsManager.Move();
+        AudioManager.Play(GameSfx.Move);
 
         Cell previousCell = CurrentCell;
 
@@ -1267,6 +1317,7 @@ public class Box : MonoBehaviour
         pushedBox.isMoving = true;
 
         HapticsManager.Push();
+        AudioManager.Play(GameSfx.Push);
 
         Cell previousCell = CurrentCell;
 
@@ -1367,6 +1418,7 @@ public class Box : MonoBehaviour
             crate.isMoving = true;
 
         HapticsManager.Push();
+        AudioManager.Play(GameSfx.HeavyPush);
 
         Cell previousCell = CurrentCell;
 
@@ -1514,6 +1566,7 @@ public class Box : MonoBehaviour
     {
         isMoving = true;
         HapticsManager.Move();
+        AudioManager.Play(GameSfx.Slide);
 
         Cell previousCell = CurrentCell;
 
@@ -1977,6 +2030,7 @@ public class Box : MonoBehaviour
         }
 
         HapticsManager.Mechanic();
+        AudioManager.Play(GameSfx.Portal);
         return true;
     }
 
@@ -2002,6 +2056,7 @@ public class Box : MonoBehaviour
 
         isCompleted = true;
         HapticsManager.Goal();
+        AudioManager.Play(GameSfx.Goal);
 
         Vector3 finalCompletedScale =
             normalVisualScale * completedScale;

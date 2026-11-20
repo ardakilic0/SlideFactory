@@ -43,7 +43,7 @@ public class UIManager : MonoBehaviour
             completeLevelText.text = "LEVEL " + levelNumber;
     }
 
-    public void ShowLevelComplete()
+    public void ShowLevelComplete(bool isFinalLevel = false)
     {
         HapticsManager.LevelComplete();
 
@@ -51,7 +51,15 @@ public class UIManager : MonoBehaviour
             completeLevelText.text = "LEVEL " + currentLevelNumber;
 
         if (levelCompletePanel != null)
+        {
+            LevelCompleteAnimator animator =
+                levelCompletePanel.GetComponentInChildren<LevelCompleteAnimator>(true);
+
+            if (animator != null)
+                animator.SetFinalLevelMode(isFinalLevel);
+
             levelCompletePanel.SetActive(true);
+        }
     }
 
     public void HideLevelComplete()

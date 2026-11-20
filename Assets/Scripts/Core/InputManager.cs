@@ -6,6 +6,11 @@ using UnityEngine.UI;
 
 public class InputManager : MonoBehaviour
 {
+    public static InputManager Instance { get; private set; }
+
+    // Tutorials / popups can block board input.
+    public static bool BlockBoardInput;
+
     [Header("Swipe")]
     [SerializeField] private float swipeScreenRatio = 0.045f;
     [SerializeField] private float minSwipePixels = 28f;
@@ -39,8 +44,33 @@ public class InputManager : MonoBehaviour
         }
     }
 
+    private void Awake()
+    {
+        Instance = this;
+        BlockBoardInput = false;
+    }
+
+    private void OnDestroy()
+    {
+        if (Instance == this)
+            Instance = null;
+    }
+
+    public void CancelAll()
+    {
+        CancelPointer();
+        ClearQueue();
+    }
+
     private void Update()
     {
+        if (BlockBoardInput)
+        {
+            CancelPointer();
+            ClearQueue();
+            return;
+        }
+
         if (LevelManager.Instance != null &&
             LevelManager.Instance.IsInputLocked)
         {
@@ -130,32 +160,8 @@ public class InputManager : MonoBehaviour
         // TAP
         if (direction == Vector2Int.zero)
         {
-            if (pointerBox.CanBeSelected &&
-                pointerBox.CurrentCell != null)
-            {
-                // PORTAL REACTIVATION
-                // Successful teleport does NOT spend a move.
-                if (pointerBox.CurrentCell.HasPortal)
-                {
-                    bool teleported =
-                        pointerBox.TryReactivatePortal();
-
-                    if (teleported)
-                    {
-                        CancelPointer();
-                        return;
-                    }
-                }
-
-                // GRID BUFFER -> UI BUFFER
-                if (pointerBox.CurrentCell.HasBufferPad &&
-                    BufferManager.Instance != null)
-                {
-                    BufferManager.Instance.TryStoreBox(
-                        pointerBox
-                    );
-                }
-            }
+            // Portal re-activation (free) or grid buffer -> UI buffer.
+            GameActions.TryTap(pointerBox);
 
             CancelPointer();
             return;
@@ -225,17 +231,16 @@ public class InputManager : MonoBehaviour
 
             moveQueue.RemoveAt(i);
 
-            bool wasSelectable =
-                command.box.CanBeSelected;
+            if (!command.box.gameObject.activeInHierarchy)
+            {
+                i = -1;
+                continue;
+            }
 
-            command.box.Move(command.direction);
-
-            bool moveStarted =
-                wasSelectable &&
-                !command.box.CanBeSelected;
-
-            if (moveStarted)
-                RegisterMove();
+            GameActions.TrySwipe(
+                command.box,
+                command.direction
+            );
 
             i = -1;
 
@@ -264,15 +269,6 @@ public class InputManager : MonoBehaviour
     private void ClearQueue()
     {
         moveQueue.Clear();
-    }
-
-    private void RegisterMove()
-    {
-        if (LevelManager.Instance == null)
-            return;
-
-        LevelManager.Instance
-            .RegisterSuccessfulPlayerAction();
     }
 
     private Vector2Int GetDirection(Vector2 delta)

@@ -190,6 +190,7 @@ public class FloorSwitch : MonoBehaviour
             return;
 
         isActivated = true;
+        AudioManager.Play(GameSfx.Switch);
 
         // EN ÖNEMLİ KISIM:
         // Pressed sprite anında görünür.

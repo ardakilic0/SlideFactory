@@ -152,6 +152,7 @@ public class Door : MonoBehaviour
             return;
 
         IsOpen = true;
+        AudioManager.Play(GameSfx.DoorOpen);
         closeWhenEmpty = false;
 
         if (doorCollider != null)
@@ -180,6 +181,7 @@ public class Door : MonoBehaviour
             return;
 
         IsOpen = false;
+        AudioManager.Play(GameSfx.DoorClose);
 
         if (animationRoutine != null)
         {
@@ -379,6 +381,26 @@ public class Door : MonoBehaviour
         leftLeaf.localPosition = leftClosedPosition;
         rightLeaf.localPosition = rightClosedPosition;
         animationRoutine = null;
+    }
+
+    // Undo restore: jump to the current logical state, no animation.
+    public void SnapToState()
+    {
+        if (animationRoutine != null)
+        {
+            StopCoroutine(animationRoutine);
+            animationRoutine = null;
+        }
+
+        closeWhenEmpty = false;
+
+        if (doorCollider != null)
+            doorCollider.enabled = !IsOpen;
+
+        if (connectionIndicatorRenderer != null)
+            connectionIndicatorRenderer.enabled = !IsOpen;
+
+        SetDoorPosition(IsOpen);
     }
 
     // =========================================================

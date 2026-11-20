@@ -116,6 +116,83 @@ public class BufferManager : MonoBehaviour
         }
     }
 
+    public bool CanReturnSlot(int slotIndex)
+    {
+        if (storedBoxes == null ||
+            !IsValidSlot(slotIndex) ||
+            storedBoxes[slotIndex] == null)
+        {
+            return false;
+        }
+
+        return CanReturnAnyStoredBox;
+    }
+
+    public Box GetStoredBox(int slotIndex)
+    {
+        if (storedBoxes == null || !IsValidSlot(slotIndex))
+            return null;
+
+        return storedBoxes[slotIndex];
+    }
+
+    public int GetSlotOfBox(Box box)
+    {
+        if (box == null || storedBoxes == null)
+            return -1;
+
+        for (int i = 0; i < storedBoxes.Length; i++)
+        {
+            if (storedBoxes[i] == box)
+                return i;
+        }
+
+        return -1;
+    }
+
+    public RectTransform GetSlotRect(int slotIndex)
+    {
+        if (slotButtons == null ||
+            slotIndex < 0 ||
+            slotIndex >= slotButtons.Length ||
+            slotButtons[slotIndex] == null)
+        {
+            return null;
+        }
+
+        return slotButtons[slotIndex].transform as RectTransform;
+    }
+
+    // Undo: puts a Box straight into a UI slot, without animation.
+    // The Box must currently stand on the active pad cell.
+    public void RestoreStoredBox(int slotIndex, Box box)
+    {
+        if (box == null ||
+            currentPad == null ||
+            storedBoxes == null ||
+            !IsValidSlot(slotIndex))
+        {
+            return;
+        }
+
+        box.SetBufferVisual01(1f);
+
+        ApplyWorldMatchedUILayout(
+            slotIndex,
+            box
+        );
+
+        storedBoxes[slotIndex] = box;
+
+        box.EnterBufferSilently();
+
+        currentPad.CloseShutterInstant();
+        currentPad.ReleaseBox(box);
+
+        SetUIShutterOpen01(slotIndex, 1f);
+        UpdateUI();
+    }
+
     // =========================================================
     // AWAKE
     // =========================================================
@@ -160,7 +237,7 @@ public class BufferManager : MonoBehaviour
             slotButtons[i]
                 .onClick
                 .AddListener(
-                    () => TryReturnBox(slotIndex)
+                    () => GameActions.TryReturnFromBuffer(slotIndex)
                 );
         }
 

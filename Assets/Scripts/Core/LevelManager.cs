@@ -1,5 +1,8 @@
+using System;
 using System.Collections;
+using System.Collections.Generic;
 using UnityEngine;
+using UnityEngine.SceneManagement;
 
 public class LevelManager : MonoBehaviour
 {
@@ -58,6 +61,24 @@ public class LevelManager : MonoBehaviour
 
     private bool isLevelEnded;
 
+    // Move limit of the current attempt (level limit + bought moves).
+    private int moveBudget;
+
+    // Undo: pieces glide back to their old cells for a moment.
+    private Coroutine restoreTween;
+    private bool restoreAnimating;
+
+    // =========================================================
+    // EVENTS (tutorial, HUD, power-ups)
+    // =========================================================
+
+    public static event Action<int> LevelLoaded;
+    public static event Action<int, LevelReward> LevelCompleted;
+    public static event Action<int, LevelFailReason> LevelFailed;
+    public static event Action BoardRestored;
+    public static event Action MovesChanged;
+    public static event Action<int> OutOfLives;
+
     private Coroutine loadRoutine;
     private Coroutine gameStateCheckRoutine;
 
@@ -66,12 +87,36 @@ public class LevelManager : MonoBehaviour
 
     public bool IsInputLocked =>
         isLevelEnded ||
+        restoreAnimating ||
         movesRemaining <= 0 ||
         (BufferManager.Instance != null &&
          BufferManager.Instance.IsTransitioning);
 
     public int CurrentLevelIndex =>
         currentLevelIndex;
+
+    public bool IsLevelEnded =>
+        isLevelEnded;
+
+    public bool IsLoading =>
+        loadRoutine != null;
+
+    public bool IsBoardBusy =>
+        loadRoutine != null || AnyBoxIsBusy();
+
+    public int MoveBudget =>
+        moveBudget;
+
+    public int MovesUsed =>
+        moveBudget - movesRemaining;
+
+    // Undo may run when the board rests: during play, or on the
+    // fail screen (to step back out of a dead end).
+    public bool CanRestoreSnapshot =>
+        loadRoutine == null &&
+        !AnyBoxIsBusy() &&
+        (!isLevelEnded || (LevelFailUI.Instance != null &&
+                           LevelFailUI.Instance.IsShowing));
 
     public bool IsDevelopmentMode =>
         useStartingLevelForTesting;
@@ -215,12 +260,8 @@ public class LevelManager : MonoBehaviour
     [ContextMenu("Reset Saved Progress")]
     public void ResetSavedProgress()
     {
-        PlayerPrefs.SetInt(
-            CurrentLevelSaveKey,
-            0
-        );
-
-        PlayerPrefs.Save();
+        // Everything: level, stars, coins, power-ups, tutorials, lives.
+        ProgressManager.ResetAll();
 
         Debug.Log(
             "Saved progression reset. Next normal start = Level 1."
@@ -243,6 +284,14 @@ public class LevelManager : MonoBehaviour
                 levelIndex
             );
 
+            return;
+        }
+
+        // Lives (energy): only when EconomyConfig.LivesEnabled.
+        if (!useStartingLevelForTesting &&
+            !LivesManager.CanPlay(levelIndex))
+        {
+            SafeEvents.Raise(OutOfLives, levelIndex);
             return;
         }
 
@@ -292,6 +341,17 @@ public class LevelManager : MonoBehaviour
             LevelDatabase.GetMoveLimit(
                 levelIndex
             );
+
+        moveBudget =
+            movesRemaining;
+
+        if (restoreTween != null)
+            StopCoroutine(restoreTween);
+
+        restoreTween = null;
+        restoreAnimating = false;
+
+        UndoSystem.Clear();
 
         UpdateMoveUI();
 
@@ -372,6 +432,7 @@ public class LevelManager : MonoBehaviour
         // CONTENT
         // =====================================================
 
+        AudioManager.SuppressSfx(0.25f);
         CreateLevel(
             levelData
         );
@@ -393,6 +454,10 @@ public class LevelManager : MonoBehaviour
             null;
 
         ScheduleGameStateCheck();
+
+        SafeEvents.Raise(LevelLoaded, 
+            currentLevelIndex
+        );
     }
 
     // =========================================================
@@ -856,6 +921,8 @@ public class LevelManager : MonoBehaviour
 
     private void UpdateMoveUI()
     {
+        SafeEvents.Raise(MovesChanged);
+
         if (MoveCounterUI.Instance == null)
         {
             return;
@@ -1049,6 +1116,9 @@ public class LevelManager : MonoBehaviour
 
     private bool AnyBoxIsBusy()
     {
+        if (restoreAnimating)
+            return true;
+
         // Wait until Buffer store/return animations have fully completed.
         if (BufferManager.Instance != null &&
             BufferManager.Instance.IsTransitioning)
@@ -1085,6 +1155,17 @@ public class LevelManager : MonoBehaviour
 
         isLevelEnded =
             true;
+
+        StopGameStateCheck();
+
+        LivesManager.OnLevelFailed(
+            currentLevelIndex
+        );
+
+        SafeEvents.Raise(LevelFailed, 
+            currentLevelIndex,
+            reason
+        );
 
         if (LevelFailUI.Instance != null)
         {
@@ -1147,6 +1228,30 @@ public class LevelManager : MonoBehaviour
         StopGameStateCheck();
 
         // =====================================================
+        // STARS / REWARDS
+        // =====================================================
+
+        int stars =
+            LevelDatabase.GetStars(
+                currentLevelIndex,
+                MovesUsed,
+                moveBudget > LevelDatabase.GetMoveLimit(currentLevelIndex)
+            );
+
+        LevelReward reward =
+            useStartingLevelForTesting
+                ? LevelReward.Preview(currentLevelIndex, stars)
+                : ProgressManager.RecordLevelResult(
+                    currentLevelIndex,
+                    stars
+                );
+
+        SafeEvents.Raise(LevelCompleted, 
+            currentLevelIndex,
+            reward
+        );
+
+        // =====================================================
         // SAVE NEXT LEVEL
         // =====================================================
 
@@ -1179,9 +1284,303 @@ public class LevelManager : MonoBehaviour
 
         if (UIManager.Instance != null)
         {
+            bool isFinalLevel =
+                currentLevelIndex >=
+                LevelDatabase.GetLevelCount() - 1;
+
             UIManager.Instance
-                .ShowLevelComplete();
+                .ShowLevelComplete(
+                    isFinalLevel
+                );
         }
+    }
+
+    // =========================================================
+    // EXTRA MOVES (power-up)
+    // =========================================================
+
+    // Adds moves and, if the level failed for lack of moves,
+    // continues the attempt.
+    public bool AddMoves(int amount)
+    {
+        if (amount <= 0 || loadRoutine != null)
+            return false;
+
+        bool revive =
+            isLevelEnded &&
+            LevelFailUI.Instance != null &&
+            LevelFailUI.Instance.IsShowing;
+
+        if (isLevelEnded && !revive)
+            return false;
+
+        movesRemaining += amount;
+        moveBudget += amount;
+
+        if (revive)
+        {
+            isLevelEnded = false;
+            LevelFailUI.Instance.HideFail();
+        }
+
+        UpdateMoveUI();
+        ScheduleGameStateCheck();
+        return true;
+    }
+
+    // =========================================================
+    // UNDO SNAPSHOTS
+    // =========================================================
+
+    public LevelSnapshot CaptureSnapshot()
+    {
+        if (gridManager == null || loadRoutine != null)
+            return null;
+
+        Box[] pieces =
+            gridManager.GetComponentsInChildren<Box>(true);
+
+        LevelSnapshot snapshot = new LevelSnapshot
+        {
+            levelIndex = currentLevelIndex,
+            movesRemaining = movesRemaining,
+            cells = new Vector2Int[pieces.Length],
+            onGrid = new bool[pieces.Length],
+            completed = new bool[pieces.Length],
+            bufferSlots = new int[pieces.Length],
+            openDoors = gridManager.GetPermanentlyOpenDoors()
+        };
+
+        BufferManager buffer = BufferManager.Instance;
+
+        for (int i = 0; i < pieces.Length; i++)
+        {
+            Box box = pieces[i];
+
+            snapshot.onGrid[i] = box.CurrentCell != null;
+            snapshot.cells[i] =
+                box.CurrentCell != null
+                    ? box.CurrentCell.Coordinates
+                    : Vector2Int.zero;
+
+            snapshot.completed[i] =
+                box.CurrentCell != null &&
+                box.Type != BoxType.Crate &&
+                !box.CanBeSelected &&
+                !box.IsBusy;
+
+            snapshot.bufferSlots[i] =
+                buffer != null
+                    ? buffer.GetSlotOfBox(box)
+                    : -1;
+        }
+
+        return snapshot;
+    }
+
+    public bool RestoreSnapshot(LevelSnapshot snapshot)
+    {
+        if (snapshot == null ||
+            snapshot.levelIndex != currentLevelIndex ||
+            !CanRestoreSnapshot)
+        {
+            return false;
+        }
+
+        LevelData levelData =
+            LevelDatabase.GetLevel(currentLevelIndex);
+
+        if (levelData == null)
+            return false;
+
+        StopGameStateCheck();
+
+        if (InputManager.Instance != null)
+            InputManager.Instance.CancelAll();
+
+        // Where every piece is now (for the rewind glide).
+        Box[] oldPieces = gridManager.GetComponentsInChildren<Box>(true);
+        Vector3[] oldPositions = new Vector3[oldPieces.Length];
+        bool[] oldOnGrid = new bool[oldPieces.Length];
+
+        for (int i = 0; i < oldPieces.Length; i++)
+        {
+            oldPositions[i] = oldPieces[i].transform.position;
+            oldOnGrid[i] = oldPieces[i].CurrentCell != null;
+        }
+
+        if (LevelFailUI.Instance != null &&
+            LevelFailUI.Instance.IsShowing)
+        {
+            LevelFailUI.Instance.HideFail();
+        }
+
+        AudioManager.SuppressSfx(0.35f);
+
+        // ----- rebuild the board from scratch -----
+
+        if (BufferManager.Instance != null)
+            BufferManager.Instance.ResetForLevel();
+
+        gridManager.ClearEverything();
+
+        gridManager.GenerateGrid(
+            levelData.Width,
+            levelData.Height
+        );
+
+        totalBoxes = 0;
+        completedBoxes = 0;
+
+        CreateLevel(levelData);
+
+        Box[] pieces =
+            gridManager.GetComponentsInChildren<Box>(true);
+
+        if (pieces.Length != snapshot.cells.Length)
+        {
+            Debug.LogError("Undo: piece count mismatch, reloading level.");
+            LoadLevel(currentLevelIndex);
+            return false;
+        }
+
+        foreach (Box box in pieces)
+            box.DetachForRestore();
+
+        // ----- buffered pieces, in slot order -----
+
+        BufferManager buffer = BufferManager.Instance;
+        Cell padCell = buffer != null ? buffer.CurrentPadCell : null;
+
+        for (int slot = 0; slot < 8; slot++)
+        {
+            for (int i = 0; i < pieces.Length; i++)
+            {
+                if (snapshot.onGrid[i] || snapshot.bufferSlots[i] != slot)
+                    continue;
+
+                if (padCell == null)
+                    continue;
+
+                pieces[i].Place(padCell);
+                buffer.RestoreStoredBox(slot, pieces[i]);
+            }
+        }
+
+        // ----- pieces on the grid -----
+
+        for (int i = 0; i < pieces.Length; i++)
+        {
+            if (!snapshot.onGrid[i])
+                continue;
+
+            Cell cell = gridManager.GetCell(snapshot.cells[i]);
+
+            if (cell == null)
+                continue;
+
+            Box box = pieces[i];
+            box.Place(cell);
+
+            if (snapshot.completed[i])
+            {
+                box.RestoreCompleted();
+                completedBoxes++;
+            }
+            else if (cell.HasBufferPad && box.IsBufferCompatible)
+            {
+                cell.BufferPad.TrackBox(box);
+            }
+
+            box.ResetMotionJuice();
+        }
+
+        // ----- doors and switches -----
+
+        foreach (int doorID in snapshot.openDoors)
+            gridManager.OpenDoor(doorID);
+
+        for (int i = 0; i < pieces.Length; i++)
+        {
+            Cell cell = pieces[i].CurrentCell;
+
+            if (cell != null && cell.HasSwitch)
+                cell.FloorSwitch.Activate();
+        }
+
+        gridManager.SnapAllDoors();
+
+        // ----- rewind glide -----
+
+        List<Transform> movers = new List<Transform>();
+        List<Vector3> from = new List<Vector3>();
+        List<Vector3> to = new List<Vector3>();
+
+        for (int i = 0; i < pieces.Length && i < oldPieces.Length; i++)
+        {
+            if (!oldOnGrid[i] || pieces[i].CurrentCell == null)
+                continue;
+
+            Vector3 target = pieces[i].transform.position;
+
+            if ((target - oldPositions[i]).sqrMagnitude < 0.0001f)
+                continue;
+
+            movers.Add(pieces[i].transform);
+            from.Add(oldPositions[i]);
+            to.Add(target);
+            pieces[i].transform.position = oldPositions[i];
+        }
+
+        if (restoreTween != null)
+            StopCoroutine(restoreTween);
+
+        restoreTween = movers.Count > 0
+            ? StartCoroutine(RestoreGlide(movers, from, to))
+            : null;
+
+        // ----- moves / state -----
+
+        movesRemaining = snapshot.movesRemaining;
+        isLevelEnded = false;
+
+        UpdateMoveUI();
+
+        SafeEvents.Raise(BoardRestored);
+
+        ScheduleGameStateCheck();
+        return true;
+    }
+
+    private IEnumerator RestoreGlide(List<Transform> movers, List<Vector3> from, List<Vector3> to)
+    {
+        restoreAnimating = true;
+
+        const float Duration = 0.3f;
+        float t = 0f;
+
+        while (t < Duration)
+        {
+            t += Time.unscaledDeltaTime;
+            float k = 1f - Mathf.Pow(1f - Mathf.Clamp01(t / Duration), 3f);
+
+            for (int i = 0; i < movers.Count; i++)
+            {
+                if (movers[i] != null)
+                    movers[i].position = Vector3.LerpUnclamped(from[i], to[i], k);
+            }
+
+            yield return null;
+        }
+
+        for (int i = 0; i < movers.Count; i++)
+        {
+            if (movers[i] != null)
+                movers[i].position = to[i];
+        }
+
+        restoreAnimating = false;
+        restoreTween = null;
     }
 
     // =========================================================
@@ -1190,6 +1589,15 @@ public class LevelManager : MonoBehaviour
 
     public void RestartLevel()
     {
+        // Giving up an attempt that already used moves costs a life
+        // (a failed attempt was charged when it failed).
+        if (!isLevelEnded && MovesUsed > 0)
+        {
+            LivesManager.OnLevelAbandoned(
+                currentLevelIndex
+            );
+        }
+
         LoadLevel(
             currentLevelIndex
         );
@@ -1207,9 +1615,20 @@ public class LevelManager : MonoBehaviour
         if (nextLevel >=
             LevelDatabase.GetLevelCount())
         {
+            // Final level: the complete panel's primary button
+            // reads "MAIN MENU" and returns to the menu.
             Debug.Log(
                 "All levels completed!"
             );
+
+            if (SettingsController.Instance != null)
+            {
+                SettingsController.Instance.GoToMainMenu();
+            }
+            else
+            {
+                SceneManager.LoadScene("MainMenu");
+            }
 
             return;
         }

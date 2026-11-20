@@ -198,6 +198,7 @@ public class LevelFailUI : MonoBehaviour
 
         // Fail gerçekleştiğinde güçlü feedback.
         HapticsManager.Invalid();
+        AudioManager.Play(GameSfx.Fail);
 
         showRoutine =
             StartCoroutine(

@@ -85,8 +85,20 @@ public class GridManager : MonoBehaviour
         activePressurePlates.Clear();
         permanentlyOpenDoors.Clear();
 
+        // Children are detached and hidden right away, so a level can
+        // be rebuilt in the same frame (Undo) without the old objects
+        // still showing up in GetComponentsInChildren.
+        List<Transform> children = new List<Transform>();
+
         foreach (Transform child in transform)
         {
+            children.Add(child);
+        }
+
+        foreach (Transform child in children)
+        {
+            child.gameObject.SetActive(false);
+            child.SetParent(null, false);
             Destroy(child.gameObject);
         }
 
@@ -253,6 +265,24 @@ public class GridManager : MonoBehaviour
     public bool IsDoorPermanentlyOpen(int doorID)
     {
         return permanentlyOpenDoors.Contains(doorID);
+    }
+
+    public List<int> GetPermanentlyOpenDoors()
+    {
+        return new List<int>(permanentlyOpenDoors);
+    }
+
+    // Undo restore: every door jumps to its logical state.
+    public void SnapAllDoors()
+    {
+        foreach (List<Door> doors in doorsByID.Values)
+        {
+            foreach (Door door in doors)
+            {
+                if (door != null)
+                    door.SnapToState();
+            }
+        }
     }
 
     // =========================================================

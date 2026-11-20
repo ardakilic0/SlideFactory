@@ -159,6 +159,7 @@ public class UIButtonJuice : MonoBehaviour,
             return;
         }
 
+        AudioManager.Play(GameSfx.UIClick);
         StartScaleAnimation(
             baseScale * pressedScale,
             pressDuration,

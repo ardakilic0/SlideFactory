@@ -133,6 +133,12 @@ public class MainMenuManager : MonoBehaviour
 
     public void PlayGame()
     {
+        if (!LivesManager.CanPlay(currentLevelIndex))
+        {
+            MainMenuExtras.ShowOutOfLives(PlayGame);
+            return;
+        }
+
         SceneManager.LoadScene(
             gameplaySceneName
         );
@@ -145,11 +151,8 @@ public class MainMenuManager : MonoBehaviour
     [ContextMenu("Reset Progression to Level 1")]
     private void ResetProgressionToLevel1()
     {
-        PlayerPrefs.DeleteKey(
-            CurrentLevelKey
-        );
-
-        PlayerPrefs.Save();
+        // Everything: level, stars, coins, power-ups, tutorials, lives.
+        ProgressManager.ResetAll();
 
         Debug.Log(
             "Progression reset. Next game starts from Level 1."

@@ -1,8 +1,11 @@
 
 // Slide Factory - LevelDatabase (60 levels)
 // Revision: 29 October 2026 - based on the playtest notes of the 25 October build.
-// Move limits = verified minimum + 3 (+4 on teach levels).
-// Minimum moves were calculated by exhaustive search in Claude's simulation.
+// Pars (fewest moves) come from LevelSolver run on the real game
+// rules inside Unity (ClaudeBridge "pars"), and were verified by
+// autoplaying every level in Play mode.
+// Stars: 3 = par, 2 = par + max(2, 20%), 1 = solved.
+// Move limit = 2-star threshold + 3 (+2 more on levels 1-5).
 
 // Changed levels: 8, 20, 22, 24, 34, 41, 44, 47, 50, 53, 54, 58, 60
 
@@ -547,13 +550,56 @@ public static class LevelDatabase
 
     private static readonly int[] moveLimits =
     {
-        10, 14, 12, 11, 10, 17, 9, 10, 18, 25,
-        14, 19, 11, 15, 18, 17, 14, 20, 12, 18,
-        14, 15, 18, 19, 15, 8, 18, 9, 19, 25,
-        13, 14, 20, 14, 18, 20, 14, 15, 18, 24,
-        18, 19, 14, 17, 18, 18, 19, 20, 20, 26,
-        18, 20, 21, 19, 17, 19, 20, 20, 22, 26
+        13, 17, 15, 14, 13, 19, 9, 11, 20, 29,
+        15, 21, 11, 17, 20, 19, 15, 23, 12, 20,
+        15, 17, 20, 21, 15, 9, 20, 10, 21, 29,
+        13, 15, 13, 15, 20, 23, 14, 17, 20, 27,
+        20, 21, 12, 17, 18, 18, 21, 20, 20, 27,
+        20, 23, 21, 20, 19, 21, 20, 23, 25, 27
     };
+
+    // Optimal (fewest) moves for each level, from the solver
+    // (Tools > Slide Factory > Compute Level Pars). 3 stars = par.
+    private static readonly int[] pars =
+    {
+        6, 10, 8, 7, 6, 13, 4, 6, 14, 21,
+        10, 15, 6, 11, 14, 13, 10, 16, 7, 14,
+        10, 11, 14, 15, 10, 4, 14, 5, 15, 21,
+        8, 10, 8, 10, 14, 16, 9, 11, 14, 20,
+        14, 15, 7, 11, 12, 12, 15, 14, 14, 20,
+        14, 16, 15, 14, 13, 15, 14, 16, 18, 20
+    };
+
+    public static int GetPar(int levelIndex)
+    {
+        if (levelIndex < 0 || levelIndex >= pars.Length)
+            return GetMoveLimit(levelIndex);
+
+        return pars[levelIndex];
+    }
+
+    // Most moves that still earn 2 stars.
+    public static int GetTwoStarMoves(int levelIndex)
+    {
+        int par = GetPar(levelIndex);
+        return par + System.Math.Max(2, (int)System.Math.Ceiling(par * 0.2));
+    }
+
+    // 3 = solved in par, 2 = close to par, 1 = solved.
+    // Bought extra moves always give 1 star.
+    public static int GetStars(int levelIndex, int movesUsed, bool usedExtraMoves)
+    {
+        if (usedExtraMoves)
+            return 1;
+
+        if (movesUsed <= GetPar(levelIndex))
+            return 3;
+
+        if (movesUsed <= GetTwoStarMoves(levelIndex))
+            return 2;
+
+        return 1;
+    }
 
     public static LevelData GetLevel(int levelIndex)
     {
